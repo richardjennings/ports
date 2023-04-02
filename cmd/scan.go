@@ -27,7 +27,13 @@ var scanSynCmd = &cobra.Command{
 		cobra.CheckErr(err)
 		to, err := strconv.ParseUint(args[2], 10, 16)
 		cobra.CheckErr(err)
-		timeout := time.Duration((int(to)-int(frm))/800) * time.Second
+		ports := int(to) - int(frm)
+		duration := ports / 800
+		if duration < 1 {
+			duration = 1
+		}
+		timeout := time.Duration(duration) * time.Second
+
 		fmt.Printf("using timeout %s\n", timeout)
 		res, err := syn.Scan(addr, uint16(frm), uint16(to), timeout)
 		cobra.CheckErr(err)

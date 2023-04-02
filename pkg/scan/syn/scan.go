@@ -22,6 +22,7 @@ type (
 	ScanResult struct {
 		IP     netip.Addr
 		Mac    net.HardwareAddr
+		Disc   Discovery
 		Start  time.Time
 		End    time.Time
 		Result map[layers.TCPPort]Port
@@ -30,6 +31,9 @@ type (
 		Port   layers.TCPPort
 		Open   bool
 		Closed bool
+	}
+	Discovery struct {
+		Latency time.Duration
 	}
 )
 
@@ -64,6 +68,7 @@ func Scan(addr netip.Addr, ports []uint16, timeout time.Duration) (*ScanResult, 
 	_ = gw
 
 	// This should be a method Mac()...
+	arpS := time.Now()
 	macs, err := arp.Scan(netip.PrefixFrom(addr, 32), time.Second*1)
 	if err != nil {
 		if err != nil {
@@ -71,6 +76,7 @@ func Scan(addr netip.Addr, ports []uint16, timeout time.Duration) (*ScanResult, 
 		}
 		return nil, err
 	}
+	scan.Disc.Latency = time.Now().Sub(arpS)
 	if len(macs) != 1 {
 		return nil, fmt.Errorf("did not get expected mac request response")
 	}

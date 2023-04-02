@@ -25,10 +25,14 @@ var synCmd = &cobra.Command{
 		cobra.CheckErr(err)
 
 		timeout := setTimeout(len(ports), 1000)
-		fmt.Printf("using timeout %s\n", timeout)
+		//fmt.Printf("using timeout %s\n", timeout)
 
 		res, err := syn.Scan(addr, ports, timeout)
 		cobra.CheckErr(err)
+		fmt.Printf("Starting Ports at %s\n", time.Now().Format(time.RFC822))
+		fmt.Printf("Ports scan report for (%s)\n", args[0])
+		fmt.Printf("Host is up (%s latency)\n\n", res.Disc.Latency)
+		fmt.Printf("PORT    STATE  SERVICE\n")
 		fmt.Printf("syn scan for ip: %s, mac: %s \n", res.IP, res.Mac)
 		for _, v := range res.Result {
 			if !v.Open {
@@ -36,7 +40,7 @@ var synCmd = &cobra.Command{
 			}
 			fmt.Println(v)
 		}
-		fmt.Printf("in %f seconds\n", res.End.Sub(res.Start).Seconds())
+		fmt.Printf("\nin %f seconds\n", res.End.Sub(res.Start).Seconds())
 		return nil
 	},
 }

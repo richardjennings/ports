@@ -16,7 +16,7 @@ var arpReqCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		res, err := arp.Arp{}.Request(pre, time.Second*3)
+		res, err := arp.Scan(pre, time.Second*1)
 		cobra.CheckErr(err)
 		for _, v := range res {
 			fmt.Println(v)

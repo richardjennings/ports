@@ -8,13 +8,14 @@ import (
 	"github.com/google/gopacket/macs"
 	"github.com/google/gopacket/pcap"
 	"github.com/libp2p/go-netroute"
+	"io"
+	"log"
 	"net"
 	"net/netip"
 	"time"
 )
 
 type (
-	Arp    struct{}
 	Result struct {
 		IP     net.IP
 		MAC    net.HardwareAddr
@@ -22,8 +23,8 @@ type (
 	}
 )
 
-// Request creates an ARP request for a IP addresses in the given range
-func (a Arp) Request(prefix netip.Prefix, timeout time.Duration) ([]Result, error) {
+// Scan creates ARP requests for the given range or gateway
+func Scan(prefix netip.Prefix, timeout time.Duration) ([]Result, error) {
 	var handle *pcap.Handle
 
 	router, err := netroute.New()
@@ -31,7 +32,7 @@ func (a Arp) Request(prefix netip.Prefix, timeout time.Duration) ([]Result, erro
 		return nil, err
 	}
 
-	iface, gw, src, err := router.Route(prefix.Addr().AsSlice())
+	iFace, gw, src, err := router.Route(prefix.Addr().AsSlice())
 	if err != nil {
 		return nil, err
 	}
@@ -42,7 +43,7 @@ func (a Arp) Request(prefix netip.Prefix, timeout time.Duration) ([]Result, erro
 		prefix = netip.PrefixFrom(addr, 32)
 	}
 
-	handle, err = pcap.OpenLive(iface.Name, 65536, true, pcap.BlockForever)
+	handle, err = pcap.OpenLive(iFace.Name, 65536, true, pcap.BlockForever)
 	if err != nil {
 		return nil, err
 	}
@@ -53,10 +54,16 @@ func (a Arp) Request(prefix netip.Prefix, timeout time.Duration) ([]Result, erro
 
 	result := make(chan *layers.ARP, 10)
 
-	go a.readArpResponses(handle, result, prefix, ctx)
+	go readArpResponses(handle, result, prefix, ctx)
 
-	for addr := prefix.Addr(); prefix.Contains(addr); addr = addr.Next() {
-		if err := a.writeArpRequest(handle, iface, src, addr.AsSlice()); err != nil {
+	if gw == nil {
+		for addr := prefix.Addr(); prefix.Contains(addr); addr = addr.Next() {
+			if err := writeArpRequest(handle, iFace, src, addr.AsSlice()); err != nil {
+				return nil, err
+			}
+		}
+	} else {
+		if err := writeArpRequest(handle, iFace, src, gw); err != nil {
 			return nil, err
 		}
 	}
@@ -79,43 +86,47 @@ func (a Arp) Request(prefix netip.Prefix, timeout time.Duration) ([]Result, erro
 					Vendor: macs.ValidMACPrefixMap[vendorPrefix],
 				},
 			)
+
 			if len(results) >= prefixLength {
 				cancel()
-				return results, nil
 			}
 		}
 	}
 
 }
 
-func (a Arp) readArpResponses(handle *pcap.Handle, result chan *layers.ARP, prefix netip.Prefix, ctx context.Context) {
+func readArpResponses(handle *pcap.Handle, result chan *layers.ARP, prefix netip.Prefix, ctx context.Context) {
 	raw := gopacket.NewPacketSource(handle, layers.LayerTypeEthernet)
-	in := raw.Packets()
+	var packet gopacket.Packet
+	var err error
 	for {
-		var packet gopacket.Packet
-		select {
-		case <-ctx.Done():
+		if err := ctx.Err(); err != nil {
 			return
-		case packet = <-in:
-			arpLayer := packet.Layer(layers.LayerTypeARP)
-			if arpLayer == nil {
-				continue
-			}
-			arp := arpLayer.(*layers.ARP)
-			if arp.Operation != layers.ARPReply {
-				continue
-			}
-
-			addr, _ := netip.AddrFromSlice(arp.SourceProtAddress)
-			if prefix.Contains(addr) {
-				result <- arp
-			}
+		}
+		packet, err = raw.NextPacket()
+		if err == io.EOF {
+			return
+		} else if err != nil {
+			log.Printf("read error %s\n", err)
+			continue
+		}
+		arpLayer := packet.Layer(layers.LayerTypeARP)
+		if arpLayer == nil {
+			continue
+		}
+		arp := arpLayer.(*layers.ARP)
+		if arp.Operation != layers.ARPReply {
+			continue
+		}
+		addr, _ := netip.AddrFromSlice(arp.SourceProtAddress)
+		if prefix.Contains(addr) {
+			result <- arp
 		}
 	}
 }
 
 // send arp request
-func (a Arp) writeArpRequest(handle *pcap.Handle, iface *net.Interface, src net.IP, dst net.IP) error {
+func writeArpRequest(handle *pcap.Handle, iface *net.Interface, src net.IP, dst net.IP) error {
 	eth := layers.Ethernet{
 		SrcMAC:       iface.HardwareAddr,
 		DstMAC:       net.HardwareAddr{0xff, 0xff, 0xff, 0xff, 0xff, 0xff},

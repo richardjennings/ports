@@ -20,36 +20,31 @@ import (
 
 type (
 	ScanResult struct {
-		IP       netip.Addr
-		Mac      net.HardwareAddr
-		FromPort uint16
-		ToPort   uint16
-		Start    time.Time
-		End      time.Time
-		Result   []Port
+		IP     netip.Addr
+		Mac    net.HardwareAddr
+		Start  time.Time
+		End    time.Time
+		Result map[layers.TCPPort]Port
 	}
 	Port struct {
-		Port     layers.TCPPort
-		Open     bool
-		Filtered bool
+		Port   layers.TCPPort
+		Open   bool
+		Closed bool
 	}
 )
 
-func Scan(addr netip.Addr, start uint16, end uint16, timeout time.Duration) (*ScanResult, error) {
+func Scan(addr netip.Addr, ports []uint16, timeout time.Duration) (*ScanResult, error) {
 	var err error
 	var handle *pcap.Handle
 	resChan := make(chan Port)
 	scan := &ScanResult{}
 	scan.IP = addr
-	scan.FromPort = start
-	scan.ToPort = end
-	numPorts := int(end) - int(start) + 1
-	scan.Result = make([]Port, numPorts, numPorts)
-	for p := start; p <= end; p++ {
-		scan.Result[end-p] = Port{
-			Port:     layers.TCPPort(p),
-			Open:     false,
-			Filtered: false,
+	scan.Result = make(map[layers.TCPPort]Port, len(ports))
+	for _, v := range ports {
+		scan.Result[layers.TCPPort(v)] = Port{
+			Port:   layers.TCPPort(v),
+			Open:   false,
+			Closed: false,
 		}
 	}
 	router, err := netroute.New()
@@ -96,8 +91,8 @@ func Scan(addr netip.Addr, start uint16, end uint16, timeout time.Duration) (*Sc
 	go func() {
 		pf := tcp.NewPacketFactory(tcp.PacketFactoryWithSyn())
 		var bytes []byte
-		for i := start; i <= end; i++ {
-			bytes, _ = pf.Create(src, iFace.HardwareAddr, addr.AsSlice(), scan.Mac, i, srcPort)
+		for _, v := range ports {
+			bytes, _ = pf.Create(src, iFace.HardwareAddr, addr.AsSlice(), scan.Mac, v, srcPort)
 			_ = rl.Take()
 			if err = handle.WritePacketData(bytes); err != nil {
 				log.Printf("write error %s", err)
@@ -113,13 +108,12 @@ func Scan(addr netip.Addr, start uint16, end uint16, timeout time.Duration) (*Sc
 			scan.End = time.Now()
 			return scan, nil
 		case r := <-resChan:
-			scan.Result[int(r.Port)-int(scan.FromPort)] = r
-			if c == int(scan.ToPort)-int(scan.FromPort) {
+			c++
+			scan.Result[r.Port] = r
+			if c == len(ports) {
 				scan.End = time.Now()
 				cancel()
-				log.Printf("hrre")
 			}
-			c++
 		}
 	}
 }
@@ -152,9 +146,9 @@ func filter(handle *pcap.Handle, srcPort layers.TCPPort, resChan chan Port, ctx 
 		}
 		if tcpL.DstPort == srcPort {
 			resChan <- Port{
-				Port:     tcpL.SrcPort,
-				Open:     tcpL.SYN,
-				Filtered: !tcpL.SYN && tcpL.RST,
+				Port:   tcpL.SrcPort,
+				Open:   tcpL.SYN && !tcpL.RST,
+				Closed: !tcpL.SYN && tcpL.ACK && tcpL.RST,
 			}
 		}
 	}
@@ -176,9 +170,10 @@ func (p Port) String() string {
 	switch true {
 	case p.Open:
 		return o + "open"
-	case p.Filtered:
-		return o + "filtered"
-	default:
+	case p.Closed:
 		return o + "closed"
+	default:
+		return o + "filtered"
 	}
+
 }

@@ -22,19 +22,19 @@ Mac Address: dc:a6:32:43:83:cb (Raspberry Pi Trading Ltd)
 
 Ports done: 1 IP address (1 host up) scanned in 0.011364 seconds
 ```
-Ports may be expressed as ranges, e.g. -p0-1000
+Ports may be expressed as ranges, e.g. -p0-10000
 ```
-Starting Ports at 05 Apr 23 08:00 BST
-Ports scan report for (192.168.0.111)
-Host is up (34.474375ms latency)
+$ sudo ports syn scanme.nmap.org -p0-10000
+Starting Ports at 05 Apr 23 08:29 BST
+Ports scan report for (scanme.nmap.org)
+Host is up (45.613334ms latency)
 
 PORT    STATE  SERVICE
-22      open   ssh
-53      open   domain
+9929    open   
 80      open   http
-Mac Address: dc:a6:32:43:83:cb (Raspberry Pi Trading Ltd)
+22      open   ssh
 
-Ports done: 1 IP address (1 host up) scanned in 1.000209 seconds
+Ports done: 1 IP address (1 host up) scanned in 12.001105 seconds
 ```
 
 

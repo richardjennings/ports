@@ -20,12 +20,13 @@ import (
 
 type (
 	ScanResult struct {
-		IP     netip.Addr
-		Mac    net.HardwareAddr
-		Disc   Discovery
-		Start  time.Time
-		End    time.Time
-		Result map[layers.TCPPort]Port
+		IP      netip.Addr
+		Mac     net.HardwareAddr
+		Disc    Discovery
+		Start   time.Time
+		End     time.Time
+		IsLocal bool
+		Result  map[layers.TCPPort]Port
 	}
 	Port struct {
 		Port   layers.TCPPort
@@ -65,7 +66,9 @@ func Scan(addr netip.Addr, ports []uint16, timeout time.Duration) (*ScanResult, 
 		return nil, err
 	}
 	defer handle.Close()
-	_ = gw
+	if gw == nil {
+		scan.IsLocal = true
+	}
 
 	// This should be a method Mac()...
 	arpS := time.Now()

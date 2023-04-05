@@ -3,6 +3,8 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"github.com/google/gopacket/layers"
+	"github.com/google/gopacket/macs"
 	"github.com/richardjennings/ports/pkg/scan/syn"
 	"github.com/spf13/cobra"
 	"net"
@@ -25,7 +27,6 @@ var synCmd = &cobra.Command{
 		cobra.CheckErr(err)
 
 		timeout := setTimeout(len(ports), 1000)
-		//fmt.Printf("using timeout %s\n", timeout)
 
 		res, err := syn.Scan(addr, ports, timeout)
 		cobra.CheckErr(err)
@@ -33,14 +34,24 @@ var synCmd = &cobra.Command{
 		fmt.Printf("Ports scan report for (%s)\n", args[0])
 		fmt.Printf("Host is up (%s latency)\n\n", res.Disc.Latency)
 		fmt.Printf("PORT    STATE  SERVICE\n")
-		fmt.Printf("syn scan for ip: %s, mac: %s \n", res.IP, res.Mac)
+		var state string
 		for _, v := range res.Result {
 			if !v.Open {
 				continue
 			}
-			fmt.Println(v)
+
+			if v.Open {
+				state = "open"
+			} else if v.Closed {
+				state = "closed"
+			}
+			fmt.Printf("%-7s %-6s %s\n", strconv.Itoa(int(v.Port)), state, layers.TCPPortNames[v.Port])
 		}
-		fmt.Printf("\nin %f seconds\n", res.End.Sub(res.Start).Seconds())
+		if res.IsLocal {
+			vendorPrefix := [3]byte{res.Mac[0], res.Mac[1], res.Mac[2]}
+			fmt.Printf("Mac Address: %s (%s)\n", res.Mac, macs.ValidMACPrefixMap[vendorPrefix])
+		}
+		fmt.Printf("\nPorts done: %d IP address (1 host up) scanned in %f seconds\n", 1, res.End.Sub(res.Start).Seconds())
 		return nil
 	},
 }

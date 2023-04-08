@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/macs"
-	"github.com/richardjennings/ports/pkg/scan/syn"
+	"github.com/richardjennings/ports/pkg/syn"
 	"github.com/spf13/cobra"
 	"net"
 	"net/netip"

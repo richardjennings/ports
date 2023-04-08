@@ -8,7 +8,8 @@ import (
 	"github.com/google/gopacket/pcap"
 	"github.com/libp2p/go-netroute"
 	"github.com/richardjennings/ports/pkg/arp"
-	"github.com/richardjennings/ports/pkg/scan/tcp"
+	"github.com/richardjennings/ports/pkg/ping"
+	"github.com/richardjennings/ports/pkg/tcp"
 	"go.uber.org/ratelimit"
 	"io"
 	"log"
@@ -71,7 +72,6 @@ func Scan(addr netip.Addr, ports []uint16, timeout time.Duration) (*ScanResult, 
 	}
 
 	// This should be a method Mac()...
-	arpS := time.Now()
 	macs, err := arp.Scan(netip.PrefixFrom(addr, 32), time.Second*1)
 	if err != nil {
 		if err != nil {
@@ -79,10 +79,17 @@ func Scan(addr netip.Addr, ports []uint16, timeout time.Duration) (*ScanResult, 
 		}
 		return nil, err
 	}
-	scan.Disc.Latency = time.Now().Sub(arpS)
+
+	// perform ping to ascertain latency
+	t, err := ping.Ping(addr, macs[0].MAC)
+	if err != nil {
+		return nil, err
+	}
+	scan.Disc.Latency = t
 	if len(macs) != 1 {
 		return nil, fmt.Errorf("did not get expected mac request response")
 	}
+
 	scan.Mac = macs[0].MAC
 	scan.Start = time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -137,7 +144,6 @@ func filter(handle *pcap.Handle, srcPort layers.TCPPort, resChan chan Port, ctx 
 	ip4L := &layers.IPv4{}
 	tcpL := &layers.TCP{}
 	parser := gopacket.NewDecodingLayerParser(layers.LayerTypeEthernet, ethL, ip4L, tcpL)
-	var i int
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil
@@ -149,7 +155,6 @@ func filter(handle *pcap.Handle, srcPort layers.TCPPort, resChan chan Port, ctx 
 			log.Printf("read error %s\n", err)
 			continue
 		}
-		i++
 		if err := parser.DecodeLayers(packet.Data(), &decoded); err != nil {
 			continue
 		}

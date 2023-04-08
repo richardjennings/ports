@@ -45,6 +45,12 @@ $ sudo ports arp 192.168.10.0/24
 192.168.0.2     3E:77:B0:33:35:BB Some Other Vendor
 ```
 
+* [x] Ping:
+```
+$ sudo ports ping google.com
+33.622791ms
+```
+
 ## Todo
 lots.
 

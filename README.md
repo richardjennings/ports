@@ -25,16 +25,16 @@ Ports done: 1 IP address (1 host up) scanned in 0.011364 seconds
 Ports may be expressed as ranges, e.g. -p0-10000
 ```
 $ sudo ports syn scanme.nmap.org -p0-10000
-Starting Ports at 05 Apr 23 08:29 BST
+Starting Ports at 08 Apr 23 10:54 BST
 Ports scan report for (scanme.nmap.org)
-Host is up (45.613334ms latency)
+Host is up (164.267875ms latency)
 
 PORT    STATE  SERVICE
-9929    open   
-80      open   http
 22      open   ssh
+80      open   http
+9929    open   
 
-Ports done: 1 IP address (1 host up) scanned in 12.001105 seconds
+Ports done: 1 IP address (1 host up) scanned in 12.001028 seconds
 ```
 
 

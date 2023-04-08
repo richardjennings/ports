@@ -27,6 +27,7 @@ type (
 		Start   time.Time
 		End     time.Time
 		IsLocal bool
+		Ports   []layers.TCPPort
 		Result  map[layers.TCPPort]Port
 	}
 	Port struct {
@@ -39,16 +40,17 @@ type (
 	}
 )
 
-func Scan(addr netip.Addr, ports []uint16, timeout time.Duration) (*ScanResult, error) {
+func Scan(addr netip.Addr, ports []layers.TCPPort, timeout time.Duration) (*ScanResult, error) {
 	var err error
 	var handle *pcap.Handle
 	resChan := make(chan Port)
 	scan := &ScanResult{}
 	scan.IP = addr
 	scan.Result = make(map[layers.TCPPort]Port, len(ports))
+	scan.Ports = ports
 	for _, v := range ports {
-		scan.Result[layers.TCPPort(v)] = Port{
-			Port:   layers.TCPPort(v),
+		scan.Result[v] = Port{
+			Port:   v,
 			Open:   false,
 			Closed: false,
 		}

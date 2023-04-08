@@ -1,14 +1,11 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/macs"
 	"github.com/richardjennings/ports/pkg/syn"
 	"github.com/spf13/cobra"
-	"net"
-	"net/netip"
 	"strconv"
 	"strings"
 	"time"
@@ -98,20 +95,6 @@ func parsePortSpec(portSpec string) ([]uint16, error) {
 	return ports, nil
 }
 
-func ipHost(v string) (netip.Addr, error) {
-	addr, err := netip.ParseAddr(v)
-	if err != nil {
-		ips, err := net.LookupIP(v)
-		if err != nil {
-			return netip.Addr{}, errors.New("unable to parse ip or host")
-		}
-		if len(ips) == 0 {
-			return netip.Addr{}, errors.New("could not resolve an A record for host")
-		}
-		addr, _ = netip.AddrFromSlice(ips[0])
-	}
-	return addr, nil
-}
 
 func init() {
 	synCmd.PersistentFlags().StringVarP(&ports, "ports", "p", "0-1000", "--ports<spec>")

@@ -38,7 +38,7 @@ func (p *PacketFactory) Create(
 	srcMAC net.HardwareAddr,
 	dst net.IP,
 	dstMAC net.HardwareAddr,
-	dstPort uint16,
+	dstPort layers.TCPPort,
 	srcPort layers.TCPPort,
 ) (buf []byte, err error) {
 	ip := &layers.IPv4{

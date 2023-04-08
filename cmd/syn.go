@@ -32,7 +32,8 @@ var synCmd = &cobra.Command{
 		fmt.Printf("Host is up (%s latency)\n\n", res.Disc.Latency)
 		fmt.Printf("PORT    STATE  SERVICE\n")
 		var state string
-		for _, v := range res.Result {
+		for _, p := range res.Ports {
+			v := res.Result[p]
 			if !v.Open {
 				continue
 			}
@@ -61,10 +62,10 @@ func setTimeout(numPorts int, ratelimit int) time.Duration {
 	return time.Duration(duration) * time.Second
 }
 
-func parsePortSpec(portSpec string) ([]uint16, error) {
-	ports := []uint16{}
+func parsePortSpec(portSpec string) ([]layers.TCPPort, error) {
+	var ports []layers.TCPPort
 	if portSpec == "" {
-		return []uint16{22}, nil
+		return []layers.TCPPort{22}, nil
 	}
 	pParts := strings.Split(portSpec, ",")
 	for _, v := range pParts {
@@ -81,7 +82,7 @@ func parsePortSpec(portSpec string) ([]uint16, error) {
 					return nil, err
 				}
 				for i := nn; i < nnn; i++ {
-					ports = append(ports, uint16(i))
+					ports = append(ports, layers.TCPPort(i))
 				}
 			}
 		} else {
@@ -89,12 +90,11 @@ func parsePortSpec(portSpec string) ([]uint16, error) {
 			if err != nil {
 				return nil, err
 			}
-			ports = append(ports, uint16(nn))
+			ports = append(ports, layers.TCPPort(nn))
 		}
 	}
 	return ports, nil
 }
-
 
 func init() {
 	synCmd.PersistentFlags().StringVarP(&ports, "ports", "p", "0-1000", "--ports<spec>")

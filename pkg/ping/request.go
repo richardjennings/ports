@@ -2,6 +2,7 @@ package ping
 
 import (
 	"context"
+	"errors"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
@@ -66,16 +67,16 @@ func Ping(addr netip.Addr, mac net.HardwareAddr) (time.Duration, error) {
 	defer cancel()
 	res := make(chan time.Time)
 
-	go func(ctx context.Context, res chan time.Time, addr netip.Addr) ([]int, error) {
+	go func(ctx context.Context, res chan time.Time, addr netip.Addr) {
 		var packet gopacket.Packet
 		var decoded []gopacket.LayerType
 		for {
 			if err := ctx.Err(); err != nil {
-				return nil, err
+				return
 			}
 			packet, err = raw.NextPacket()
 			if err == io.EOF {
-				return nil, err
+				return
 			} else if err != nil {
 				log.Printf("read error %s\n", err)
 				continue
@@ -101,7 +102,7 @@ func Ping(addr netip.Addr, mac net.HardwareAddr) (time.Duration, error) {
 
 	select {
 	case <-ctx.Done():
-		return 0, nil
+		return 0, errors.New("request timeout")
 	case r := <-res:
 		t := r.Sub(s)
 		cancel()

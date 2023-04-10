@@ -17,6 +17,9 @@ var pingReqCmd = &cobra.Command{
 		cobra.CheckErr(err)
 		res, err := arp.Scan(netip.PrefixFrom(addr, 32), time.Second)
 		cobra.CheckErr(err)
+		if len(res) == 0 {
+			cobra.CheckErr("could not find host")
+		}
 		r, err := ping.Ping(addr, res[0].MAC)
 		cobra.CheckErr(err)
 		fmt.Println(r)

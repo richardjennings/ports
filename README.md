@@ -11,18 +11,28 @@ and [libpcap](https://www.tcpdump.org).
 ## Usage
 * [x] Syn (Stealth) Port Scanning
 ```
-$ sudo ports syn 192.168.0.111 -p22
-Starting Ports at 05 Apr 23 07:58 BST
-Ports scan report for (192.168.0.111)
-Host is up (34.35475ms latency)
+$ sudo ports syn 192.168.0.0/24 -p 443
+Starting Ports at 10 Apr 23 17:38 BST
+Ports scan report for (192.168.0.1)
+Host is up (11.170167ms latency)
 
 PORT    STATE  SERVICE
-22      open   ssh
-Mac Address: dc:a6:32:43:83:cb (Raspberry Pi Trading Ltd)
+443      open   http
+Mac Address: 00:00:00.. (some device)
 
-Ports done: 1 IP address (1 host up) scanned in 0.011364 seconds
+Ports scan report for (192.168.0.2)
+Host is up (11.165917ms latency)
+
+PORT    STATE  SERVICE
+443      open   http
+Mac Address: 00:00:00.. (another device)
+...
+
+Ports done: 256 IP address (7 host up) scanned in 6.355709 seconds
 ```
-Ports may be expressed as ranges, e.g. -p0-10000
+
+
+Ports may be expressed as ranges, e.g. -p0-10000 
 ```
 $ sudo ports syn scanme.nmap.org -p0-10000
 Starting Ports at 08 Apr 23 10:54 BST

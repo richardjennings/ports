@@ -2,6 +2,7 @@ package syn
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -11,125 +12,184 @@ import (
 	"github.com/richardjennings/ports/pkg/ping"
 	"github.com/richardjennings/ports/pkg/tcp"
 	"go.uber.org/ratelimit"
-	"io"
 	"log"
 	"math/rand"
 	"net"
 	"net/netip"
+	"sync"
 	"time"
 )
 
 type (
+	Result struct {
+		Start   time.Time
+		End     time.Time
+		Results map[netip.Addr]*ScanResult
+	}
 	ScanResult struct {
 		IP      netip.Addr
 		Mac     net.HardwareAddr
-		Disc    Discovery
-		Start   time.Time
-		End     time.Time
+		Latency time.Duration
 		IsLocal bool
 		Ports   []layers.TCPPort
 		Result  map[layers.TCPPort]Port
+		Live    bool
+	}
+	ResChanS struct {
+		Ip   netip.Addr
+		Port Port
 	}
 	Port struct {
 		Port   layers.TCPPort
 		Open   bool
 		Closed bool
-	}
-	Discovery struct {
-		Latency time.Duration
+		// filtered results are absent from the results
 	}
 )
 
-func Scan(addr netip.Addr, ports []layers.TCPPort, timeout time.Duration) (*ScanResult, error) {
+func Scan(prefix netip.Prefix, ports []layers.TCPPort, timeout time.Duration) (Result, error) {
 	var err error
 	var handle *pcap.Handle
-	resChan := make(chan Port)
-	scan := &ScanResult{}
-	scan.IP = addr
-	scan.Result = make(map[layers.TCPPort]Port, len(ports))
-	scan.Ports = ports
-	for _, v := range ports {
-		scan.Result[v] = Port{
-			Port:   v,
-			Open:   false,
-			Closed: false,
-		}
-	}
-	router, err := netroute.New()
-	if err != nil {
-		return nil, err
-	}
-	iFace, gw, src, err := router.Route(addr.AsSlice())
-	if err != nil {
-		return nil, err
-	}
-	handle, err = pcap.OpenLive(iFace.Name, 65536, true, pcap.BlockForever)
-	if err != nil {
-		log.Printf("open live error %s", err)
-		return nil, err
-	}
-	defer handle.Close()
-	if gw == nil {
-		scan.IsLocal = true
+
+	wDone := make(chan bool)
+	rDone := make(chan bool)
+	resChan := make(chan ResChanS)
+
+	result := Result{
+		Start:   time.Now(),
+		Results: make(map[netip.Addr]*ScanResult),
 	}
 
-	// This should be a method Mac()...
-	macs, err := arp.Scan(netip.PrefixFrom(addr, 32), time.Second*1)
+	router, err := netroute.New()
+	if err != nil {
+		return result, err
+	}
+
+	iFace, gw, src, err := router.Route(prefix.Addr().AsSlice())
+	if err != nil {
+		return result, err
+	}
+
+	// live host detection
+	macs, err := arp.Scan(prefix, time.Second*3)
 	if err != nil {
 		if err != nil {
 			log.Printf("mac error %s", err)
 		}
-		return nil, err
+		return result, err
+	}
+	if len(macs) < 1 {
+		return result, errors.New("arp scan did not return macs")
+	}
+
+	// build results for all ips in prefix. Might be inefficient - might be useful ?
+	for addr := prefix.Addr(); prefix.Contains(addr); addr = addr.Next() {
+		scan := &ScanResult{}
+		scan.IP = addr
+		scan.Result = make(map[layers.TCPPort]Port, len(ports))
+		scan.Ports = ports
+		if gw == nil {
+			scan.IsLocal = true
+		}
+		result.Results[addr] = scan
+	}
+
+	// set mac for results as either gateway or local net
+	if gw != nil {
+		for _, v := range result.Results {
+			v.Mac = macs[0].MAC
+			// use ping to determine if live
+		}
+	} else {
+		for _, v := range macs {
+			result.Results[v.IP].Mac = v.MAC
+			// replied to arp so,
+			result.Results[v.IP].Live = true
+		}
 	}
 
 	// perform ping to ascertain latency
-	t, err := ping.Ping(addr, macs[0].MAC)
-	if err != nil {
-		return nil, err
-	}
-	scan.Disc.Latency = t
-	if len(macs) != 1 {
-		return nil, fmt.Errorf("did not get expected mac request response")
+	// @todo concurrently
+	for addr, r := range result.Results {
+		if len(r.Mac) == 0 {
+			// local without arp response
+			continue
+		}
+		t, err := ping.Ping(addr, r.Mac)
+		if err != nil {
+			return result, err
+		}
+		result.Results[addr].Latency = t
+		if t > 0 {
+			result.Results[addr].Live = true
+		}
 	}
 
-	scan.Mac = macs[0].MAC
-	scan.Start = time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
+	// open live handle
+	handle, err = pcap.OpenLive(iFace.Name, 65536, true, pcap.BlockForever)
+	if err != nil {
+		log.Printf("open live error %s", err)
+		return result, err
+	}
+	defer handle.Close()
 
 	srcPort := randSrcPort()
 
 	// Filter
+	wg := sync.WaitGroup{}
+	wg.Add(1)
 	go func() {
-		_ = filter(handle, srcPort, resChan, ctx)
+		filter(handle, srcPort, prefix, resChan, rDone)
+		wg.Done()
 	}()
 
 	// Write Requests
 	rl := ratelimit.New(1000)
-	go func() {
+	go func(result *Result, wDone chan bool) {
 		pf := tcp.NewPacketFactory(tcp.PacketFactoryWithSyn())
 		var bytes []byte
-		for _, v := range ports {
-			bytes, _ = pf.Create(src, iFace.HardwareAddr, addr.AsSlice(), scan.Mac, v, srcPort)
-			_ = rl.Take()
-			if err = handle.WritePacketData(bytes); err != nil {
-				log.Printf("write error %s", err)
-				return
+		for addr, r := range result.Results {
+			if !r.Live {
+				continue
+			}
+			for _, v := range ports {
+				bytes, _ = pf.Create(src, iFace.HardwareAddr, addr.AsSlice(), r.Mac, v, srcPort)
+				_ = rl.Take() // ratelimit pause
+				if err = handle.WritePacketData(bytes); err != nil {
+					log.Printf("write error %s", err)
+					return
+				}
 			}
 		}
-	}()
+		wDone <- true
+	}(&result, wDone)
 
-	c := 0
+	var ctx context.Context
+	var cancel context.CancelFunc
+
+	<-wDone
+	// wait for write to finish before starting timeout
+	ctx, cancel = context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	var incomplete bool
 	for {
 		select {
 		case <-ctx.Done():
-			scan.End = time.Now()
-			return scan, nil
+			result.End = time.Now()
+			rDone <- true
+			wg.Wait()
+			return result, nil
 		case r := <-resChan:
-			c++
-			scan.Result[r.Port] = r
-			if c == len(ports) {
-				scan.End = time.Now()
+			result.Results[r.Ip].Result[r.Port.Port] = r.Port
+			// check if all finished
+			incomplete = false
+			for _, v := range result.Results {
+				if len(v.Result) != len(ports) {
+					incomplete = true
+				}
+			}
+			if !incomplete {
 				cancel()
 			}
 		}
@@ -137,36 +197,35 @@ func Scan(addr netip.Addr, ports []layers.TCPPort, timeout time.Duration) (*Scan
 }
 
 // Filter writes Results to result channel that match characteristics
-func filter(handle *pcap.Handle, srcPort layers.TCPPort, resChan chan Port, ctx context.Context) error {
+func filter(handle *pcap.Handle, srcPort layers.TCPPort, prefix netip.Prefix, resChan chan ResChanS, rDone chan bool) {
 	var packet gopacket.Packet
-	var err error
+	//var err error
 	var decoded []gopacket.LayerType
+	var srcAddr netip.Addr
+	var ok bool
 	raw := gopacket.NewPacketSource(handle, layers.LayerTypeEthernet)
 	ethL := &layers.Ethernet{}
 	ip4L := &layers.IPv4{}
 	tcpL := &layers.TCP{}
 	parser := gopacket.NewDecodingLayerParser(layers.LayerTypeEthernet, ethL, ip4L, tcpL)
 	for {
-		if err := ctx.Err(); err != nil {
-			return nil
-		}
-		packet, err = raw.NextPacket()
-		if err == io.EOF {
-			return nil
-		} else if err != nil {
-			log.Printf("read error %s\n", err)
-			continue
-		}
-		if err := parser.DecodeLayers(packet.Data(), &decoded); err != nil {
-			continue
-		}
-		if tcpL.DstPort == srcPort {
-			resChan <- Port{
-				Port:   tcpL.SrcPort,
-				Open:   tcpL.SYN && !tcpL.RST,
-				Closed: !tcpL.SYN && tcpL.ACK && tcpL.RST,
+		select {
+		case <-rDone:
+			return
+		case packet = <-raw.Packets():
+			if err := parser.DecodeLayers(packet.Data(), &decoded); err != nil {
+				continue
+			}
+			srcAddr, ok = netip.AddrFromSlice(ip4L.SrcIP)
+			if tcpL.DstPort == srcPort && ok && prefix.Contains(srcAddr) {
+				resChan <- ResChanS{Ip: srcAddr, Port: Port{
+					Port:   tcpL.SrcPort,
+					Open:   tcpL.SYN && !tcpL.RST,
+					Closed: !tcpL.SYN && tcpL.ACK && tcpL.RST,
+				}}
 			}
 		}
+
 	}
 }
 

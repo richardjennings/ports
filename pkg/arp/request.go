@@ -17,7 +17,7 @@ import (
 
 type (
 	Result struct {
-		IP     net.IP
+		IP     netip.Addr
 		MAC    net.HardwareAddr
 		Vendor string
 	}
@@ -37,12 +37,6 @@ func Scan(prefix netip.Prefix, timeout time.Duration) ([]Result, error) {
 		return nil, err
 	}
 
-	// if gateway is not nil the range is outside the network
-	if gw != nil {
-		addr, _ := netip.AddrFromSlice(gw.To4())
-		prefix = netip.PrefixFrom(addr, 32)
-	}
-
 	handle, err = pcap.OpenLive(iFace.Name, 65536, true, pcap.BlockForever)
 	if err != nil {
 		return nil, err
@@ -54,7 +48,12 @@ func Scan(prefix netip.Prefix, timeout time.Duration) ([]Result, error) {
 
 	result := make(chan *layers.ARP, 10)
 
-	go readArpResponses(handle, result, prefix, ctx)
+	dstPrefix := prefix
+	if gw != nil {
+		addr, _ := netip.AddrFromSlice(gw.To4())
+		dstPrefix = netip.PrefixFrom(addr, 32)
+	}
+	go readArpResponses(handle, result, dstPrefix, ctx)
 
 	if gw == nil {
 		for addr := prefix.Addr(); prefix.Contains(addr); addr = addr.Next() {
@@ -69,6 +68,8 @@ func Scan(prefix netip.Prefix, timeout time.Duration) ([]Result, error) {
 	}
 
 	var results []Result
+	var addr netip.Addr
+
 	prefixLength := 1 << (32 - prefix.Bits())
 
 	for {
@@ -78,10 +79,11 @@ func Scan(prefix netip.Prefix, timeout time.Duration) ([]Result, error) {
 		case r := <-result:
 			mac := r.SourceHwAddress
 			vendorPrefix := [3]byte{mac[0], mac[1], mac[2]}
+			addr, _ = netip.AddrFromSlice(r.SourceProtAddress)
 			results = append(
 				results,
 				Result{
-					IP:     r.SourceProtAddress,
+					IP:     addr,
 					MAC:    mac,
 					Vendor: macs.ValidMACPrefixMap[vendorPrefix],
 				},

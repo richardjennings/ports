@@ -2,7 +2,6 @@ package ping
 
 import (
 	"context"
-	"errors"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
@@ -102,7 +101,7 @@ func Ping(addr netip.Addr, mac net.HardwareAddr) (time.Duration, error) {
 
 	select {
 	case <-ctx.Done():
-		return 0, errors.New("request timeout")
+		return -1, nil
 	case r := <-res:
 		t := r.Sub(s)
 		cancel()
